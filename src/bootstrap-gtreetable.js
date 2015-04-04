@@ -22,7 +22,6 @@
         if (this.options.cache > 0) {
             this.cacheManager = new GTreeTableCache(this);
         }
-        
         var lang = this.language;
         this.template = this.options.template !== undefined ? this.options.template : 
            '<table class="table gtreetable">' +
@@ -33,7 +32,7 @@
            '<div class="btn-group pull-right ' + this.options.classes.buttons + '">${actionsButton}${actionsList}</div>' +
            '</td>' +
            '</tr>' +
-           '</table>';            
+           '</table>';
 
       this.templateParts = this.options.templateParts !== undefined ? this.options.templateParts :
             {
@@ -49,26 +48,9 @@
                 actionsButton: '<button type="button" class="btn btn-sm btn-default dropdown-toggle" data-toggle="dropdown">' + lang.action + ' <span class="caret"></span></button>',
                 actionsList: ''
             };
-            
-        if (this.actions.length > 0) {
-            var templateActionsList = '<ul class="dropdown-menu" role="menu">' +
-            '<li role="presentation" class="dropdown-header">' + lang.action + '</li>';
 
-            $.each(this.actions, function (index, action) {
-                if (action.divider === true) {
-                    templateActionsList += '<li class="divider"></li>';
-                } 
-                else {
-                    var matches = action.name.match(/\$\{([\w\W]+)\}/),
-                        name = matches !== null && matches[1] !== undefined && lang.actions[matches[1]] !== undefined ? lang.actions[matches[1]] : action.name;
-                    templateActionsList += '<li role="presentation"><a href="#notarget" class="node-action-' + index + '" tabindex="-1">' + name + '</a></li>';
-                }
-            });        
+        this.renderAction(0, 0, this.options.limitLevel);
 
-            templateActionsList += '</ul>';
-            this.templateParts.actionsList = templateActionsList;
-        }
-        
         var template = this.template;
 
         $.each(this.templateParts, function(index, value) {
@@ -194,6 +176,42 @@
         generateNewId: function() {
             this._lastId += 1;
             return 'g' + this._lastId;
+        },
+
+        /////////////////////////////////////////////////
+        //                                             //
+        //              Add The New Feature            //
+        //          To Render The Action Menu          //
+        //                                             //
+        /////////////////////////////////////////////////
+
+        renderAction: function(parentId, level, limitLevel) {
+            var lang = this.language;
+
+            if (this.actions.length > 0) {
+                this.templateParts.actionsList = '';
+
+                var templateActionsList = '<ul class="dropdown-menu" role="menu">' +
+                    '<li role="presentation" class="dropdown-header">' + lang.action + '</li>';
+
+                $.each(this.actions, function (index, action) {
+                    if (action.divider === true) {
+                        templateActionsList += '<li class="divider"></li>';
+                    } else if(action.sub === true && parentId === 0) {
+                        return true;
+                    } else if(action.deepHide === true && level === limitLevel) {
+                        return true;
+                    } else {
+                        var matches = action.name.match(/\$\{([\w\W]+)\}/),
+                            name = matches !== null && matches[1] !== undefined && lang.actions[matches[1]] !== undefined ? lang.actions[matches[1]] : action.name;
+                        templateActionsList += '<li role="presentation"><a href="#notarget" class="node-action-' + index + '" tabindex="-1">' + name + '</a></li>';
+                    }
+                });
+
+                templateActionsList += '</ul>';
+                this.templateParts.actionsList = templateActionsList;
+            }
+            return this.templateParts.actionsList;
         }
     };
 
@@ -222,7 +240,7 @@
     GTreeTableNode.prototype = {
         
         getPath: function () {
-            var oNode = this, 
+            var oNode = this,
                 path = [oNode.name],
                 parent = oNode.parent;
 
@@ -268,6 +286,24 @@
             ip += '.'+oNode.id;
 
             return ip;
+        },
+
+        getLevel: function () {
+            var oNode = this,
+                index = 0,
+                parents = oNode.getParents();
+            parents.reverse();
+
+            $.each(parents, function() {
+                index++;
+            });
+
+            return index;
+        },
+
+        isLimitLevel: function() {
+            var oNode = this;
+            return oNode.manager.options.limitLevel === oNode.getLevel();
         },
         
         getSiblings: function () {
@@ -366,7 +402,13 @@
         },           
         
         init: function () {
-            this.$node = this.manager.$nodeTemplate.clone(false);    
+            this.$node = this.manager.$nodeTemplate.clone(false);
+
+            var actionLists = this.manager.renderAction(this.getParent(),
+                this.level, this.manager.options.limitLevel);
+            var template = this.$node[0].innerHTML;
+            this.$node[0].innerHTML = template.replace(/<ul[\s\S]+?<\/ul>/, actionLists);
+
             this.$name = this.$node.find('.' + this.manager.options.classes.name);
             this.$ceIcon = this.$node.find('.' + this.manager.options.classes.ceIcon);
             this.$typeIcon = this.$node.find('.' + this.manager.options.classes.typeIcon);
@@ -613,10 +655,14 @@
             } 
         },
 
+        // expand the item
         expand: function (options) {
-            var oNode = this, 
-                    prevNode = oNode,
-                settings = $.extend({}, {
+            var oNode = this;
+            // Don't expand the tree if the level was limited
+            if(oNode.isLimitLevel()) return false;
+
+            var prevNode = oNode,
+            settings = $.extend({}, {
                 isAltPressed: false,
                 onAfterFill: function (oNode, data) {
                     oNode.isExpanded(true);
@@ -1164,7 +1210,10 @@
         manyroots: false,
         draggable: false,
         dragCanExpand: false,
-        showExpandIconOnEmpty: false,        
+        showExpandIconOnEmpty: false,  
+        /** start new feature **/ 
+        limitLevel: -1,
+        /** end new feature **/ 
         languages: {
             'en-US': {
                 save: 'Save',
@@ -1187,26 +1236,34 @@
             }
         },
         defaultActions: [
-            {
+            /*{
                 name: '${createBefore}',
                 event: function (oNode, oManager) {
                     oNode.add('before', 'default');
                 }
-            },
+            },*/
+            /*
+             * @Field Sub : To special the item is just show on the sub tree.
+             *
+             * @Field deepHide : If this field is ture it means the item will be hiding in the menu
+             */
             {
                 name: '${createAfter}',
+                sub: true,
                 event: function (oNode, oManager) {
                     oNode.add('after', 'default');
                 }
             },
-            {
+/*            {
                 name: '${createFirstChild}',
+                deepHide: true,
                 event: function (oNode, oManager) {
                     oNode.add('firstChild', 'default');
                 }
-            },
+            },*/
             {
                 name: '${createLastChild}',
+                deepHide: true,
                 event: function (oNode, oManager) {
                     oNode.add('lastChild', 'default');
                 }
